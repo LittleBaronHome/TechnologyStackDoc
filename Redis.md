@@ -897,3 +897,22 @@ OK
 
 ### AOF
 
+
+
+## 发布订阅
+
+```shell
+# 订阅指定频道
+SUBSCRIBE channel
+# 订阅匹配的所有频道
+PSUBSCRIBE pattern
+# 退订
+UNSUBSCRIBE channel
+# 退订匹配的所有频道
+PUNSUBSCRIBE pattern 
+# 发布消息
+PUBLISH channel message
+```
+
+
+

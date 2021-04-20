@@ -92,7 +92,7 @@ SpringBoot为项目所需依赖提供了一站式解决方案，即starter
 
 ### 原理
 
-![启动原理图](D:\Typora\SpringBoot\images\启动原理图.png)
+![启动原理图](images/SpringBoot/启动原理图.png)
 
 ### 源码
 
