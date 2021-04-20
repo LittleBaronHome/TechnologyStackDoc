@@ -1,5 +1,42 @@
 # Git版本控制工具
 
+![image](images/Git/工作流程.png)
+
+## 工作流程
+
+```shell
+# 从远程仓库获取最新内容
+git pull
+# 将本地文件添加进暂存区
+git add
+# 将暂存区文件提交到本地仓库
+git commit
+# 将本地仓库文件推送到远程仓库
+git push
+```
+
+## 分支切换
+
+![image](images/Git/分支流程.png)
+
+```shell
+# 查看所有分支，*代表当前分支
+git branch
+# 创建新的分支
+git branch [name]
+# 删除分支 -D:强制删除
+git branch -d [name]
+
+# 切换分支 -b:若当前没有该分支，则创建后切换
+git checkout [name]
+# 合并分支
+git merge
+# 分支暂存
+git stash
+```
+
+
+
 ## 安装与配置
 
 略
