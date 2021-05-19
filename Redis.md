@@ -251,6 +251,10 @@ appendfilename "appendonly.aof" # 默认持久化文件名
 appendfsync everysec # 每秒同步1次
 # appendfsync no # 不同步
 
+# 重写规则
+no-appendfsync-on-rewrite no
+auto-aof-rewrite-percentage 100
+auto-aof-rewrite-min-size 64mb # 若aof文件超过64M，新起一个线程将文件重写，保证不会过大
 ```
 
 
@@ -897,7 +901,26 @@ OK
 
 ### AOF
 
+以日志的形式记录每一个操作，redis启动之初会读取该文件，重新构建收据（相当于将每一条命令重新执行一遍）
 
+**AOF保存的文件名appendonly.aof**
+
+持久化默认机制及修改方式详见 *配置文件 - 快照（AOF）*
+
+> 如果快照文件被损坏，redis无法正常启动。可以通过`redis-check-aof`文件修复快照，**不能保证100%修复**
+>
+> `redis-check-aof --fix appendonly.aof`
+
+**优点**
+
+* 意外宕机会丢失1s内的数据，完整性比RDB好
+
+**缺点**
+
+* 快照文件过大，数据修复慢
+* 读写同步，效率慢
+
+**两者同时开启时，redis启动默认通过AOF恢复数据**
 
 ## 发布订阅
 
@@ -916,3 +939,219 @@ PUBLISH channel message
 
 
 
+## 主从复制
+
+将一台Redis服务的数据复制到其他Redis服务器，
+
+一主多从作用：数据冗余、故障恢复、负载均衡、高可用
+
+**数据复制是单向的，只能从主节点到从节点。主节点以写为主，从节点以读为主，实现读写分离**
+
+```shell
+127.0.0.1:6379> info replication
+# Replication
+role:master # 当前是主机
+connected_slaves:0 # 从机数量
+master_replid:b73cb22bd53dabeb4d89a30f396b5d20e2f558bb
+master_replid2:0000000000000000000000000000000000000000
+master_repl_offset:0
+second_repl_offset:-1
+repl_backlog_active:0
+repl_backlog_size:1048576
+repl_backlog_first_byte_offset:0
+repl_backlog_histlen:0
+```
+
+**1. 复制三份配置文件，修改配置文件`port`，`pidfile`，`logfile`，`dbfilename`**
+
+```shell
+[root@MiWiFi-R1D-srv redis-5.0.9]# ./src/redis-server ./redis-6379.conf
+[root@MiWiFi-R1D-srv redis-5.0.9]# ./src/redis-server ./redis-6380.conf 
+[root@MiWiFi-R1D-srv redis-5.0.9]# ./src/redis-server ./redis-6381.conf 
+[root@MiWiFi-R1D-srv redis-5.0.9]# ps -ef | grep redis
+root      12367      1  0 20:13 ?        00:00:00 ./src/redis-server *:6379
+root      12378      1  0 20:13 ?        00:00:00 ./src/redis-server *:6380
+root      12389      1  0 20:13 ?        00:00:00 ./src/redis-server *:6381
+root      12400   5316  0 20:13 pts/0    00:00:00 grep --color=auto redis
+[root@MiWiFi-R1D-srv redis-5.0.9]# 
+
+```
+
+### 通过命令配置临时关系
+
+**2.寻找主机**
+
+**`slaveof host port`**
+
+```shell
+127.0.0.1:6380> slaveof 127.0.0.1 6379
+OK
+127.0.0.1:6380> info replication
+# Replication
+role:slave
+master_host:127.0.0.1
+master_port:6379
+master_link_status:up
+master_last_io_seconds_ago:3
+master_sync_in_progress:0
+slave_repl_offset:42
+slave_priority:100
+slave_read_only:1
+connected_slaves:0
+master_replid:0417ab34b2bfe5c9f95144ad1df6fb1418b83ca4
+master_replid2:0000000000000000000000000000000000000000
+master_repl_offset:42
+second_repl_offset:-1
+repl_backlog_active:1
+repl_backlog_size:1048576
+repl_backlog_first_byte_offset:1
+repl_backlog_histlen:42
+
+# 主机
+127.0.0.1:6379> info replication
+# Replication
+role:master
+connected_slaves:2
+slave0:ip=127.0.0.1,port=6380,state=online,offset=182,lag=1
+slave1:ip=127.0.0.1,port=6381,state=online,offset=182,lag=1
+master_replid:0417ab34b2bfe5c9f95144ad1df6fb1418b83ca4
+master_replid2:0000000000000000000000000000000000000000
+master_repl_offset:182
+second_repl_offset:-1
+repl_backlog_active:1
+repl_backlog_size:1048576
+repl_backlog_first_byte_offset:1
+repl_backlog_histlen:182
+
+```
+
+### 通过配置文件配置永久关系
+
+```shell
+################################# REPLICATION #################################
+
+# Master-Replica replication. Use replicaof to make a Redis instance a copy of
+# another Redis server. A few things to understand ASAP about Redis replication.
+#
+#   +------------------+      +---------------+
+#   |      Master      | ---> |    Replica    |
+#   | (receive writes) |      |  (exact copy) |
+#   +------------------+      +---------------+
+#
+# 1) Redis replication is asynchronous, but you can configure a master to
+#    stop accepting writes if it appears to be not connected with at least
+#    a given number of replicas.
+# 2) Redis replicas are able to perform a partial resynchronization with the
+#    master if the replication link is lost for a relatively small amount of
+#    time. You may want to configure the replication backlog size (see the next
+#    sections of this file) with a sensible value depending on your needs.
+# 3) Replication is automatic and does not need user intervention. After a
+#    network partition replicas automatically try to reconnect to masters
+#    and resynchronize with them.
+#
+# replicaof <masterip> <masterport>
+replicaof 127.0.0.1 6379
+```
+
+### 手动配置主节点
+
+如果主节点宕机，可选择任意从机执行**`slaveof no one`**将当前节点升级为主机,
+
+其他节点需要**手动连接到新的主机**
+
+## 哨兵模式
+
+若主机宕机，**自动将从机转换为主机**。启动一个进程，和redis服务通信，若发现某redis服务没有响应，则认为当前服务器不可用。
+
+》哨兵同样需要配置集群，多个哨兵之间相互监控，防止哨兵宕机。
+
+假设主服务器宕机，哨兵1先检测到这个结果，系统并不会马上进行处理，仅仅是哨兵1主观认为主服务器不可用（主观下线），当后续哨兵也发现主服务器不可用，且数量达到一定值，哨兵间会进行一次投票，选出一个新的主机，切换成功之后会通过发布订阅模式通知其他从机切换主机（客观下线）。**若主机恢复，会成为新主机的从机**
+
+**哨兵配置文件 sentinel.conf**
+
+```shell
+# Example sentinel.conf
+
+# 运行端口
+port 26379
+
+# 守护进程，允许后台运行
+daemonize no
+
+# 若开启守护进程，哨兵会写入pidfile文件
+pidfile /var/run/redis-sentinel.pid
+
+# 日志文件
+logfile ""
+
+# 工作目录
+dir /tmp
+
+# 监听的主机，quorum表示决策时至少要有几个哨兵同意
+# sentinel monitor <master-name> <ip> <redis-port> <quorum>
+sentinel monitor mymaster 127.0.0.1 6379 2
+
+# 若redis服务有用户名密码
+# sentinel auth-pass <master-name> <password>
+# sentinel auth-pass mymaster MySUPER--secret-0123passw0rd
+
+# 没有应答的延时时间，默认30s
+# sentinel down-after-milliseconds <master-name> <milliseconds>
+sentinel down-after-milliseconds mymaster 30000
+
+# 发生主从切换时，同时最多有多少个从机进行同步，默认1个
+# 数字越小，切换同步时间越长。数字越大，则多个从机因切换不能相应请求
+# sentinel parallel-syncs <master-name> <numreplicas>
+sentinel parallel-syncs mymaster 1
+
+# 主从切换超时时间，默认3min
+# sentinel failover-timeout <master-name> <milliseconds>
+sentinel failover-timeout mymaster 180000
+
+# SCRIPTS EXECUTION
+
+# NOTIFICATION SCRIPT
+# 发生故障的通知脚本
+# sentinel notification-script <master-name> <script-path>
+# sentinel notification-script mymaster /var/redis/notify.sh
+
+# CLIENTS RECONFIGURATION SCRIPT
+# 客户端重新配置主节点的脚本
+# sentinel client-reconfig-script <master-name> <script-path>
+# sentinel client-reconfig-script mymaster /var/redis/reconfig.sh
+```
+
+**启动哨兵**
+
+```shell
+redis-sentinel ../sentinel.conf 
+```
+
+## 缓存穿透
+
+正常流程：用户请求 到 缓存 查找数据，若查找到则直接返回，若缓存中没有，则会去数据库查数据，获取到数据之后会写入到缓存中去，便于下次查询直接命中缓存，避免数据库压力。
+
+若用户请求的数据在缓存中没有，在数据库中也没有，则每一次对该数据的请求都会直达数据库，高并发的情况下会对数据库造成极大的压力，即缓存穿透（**大批数据查不到**）。
+
+解决方案：
+
+1. 当数据库中没有该数据时，在内存中缓存一个空值，同时设置有效期。
+2. 使用布隆过滤器
+
+## 缓存击穿
+
+若一个非常热点发key，在失效的瞬间，高并发集中请求到数据库，到时数据库压力急增，即缓存击穿（**热点key缓存过期**）
+
+解决方案
+
+1. 热点key永不过期
+2. 加分布式锁
+
+## 缓存雪崩
+
+在某个时间段，缓存集体过期或Redis宕机，导致大量请求到数据库，数据库压力增大，即缓存雪崩（**缓存大面积过期**）
+
+解决方案
+
+1. 优化缓存过期时间
+2. 搭建redis集群
